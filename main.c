@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/mman.h>
+#include "threadpool.h"
 
 #include IMPL
 
@@ -19,13 +20,18 @@
 #include "debug.h"
 #include <fcntl.h>
 #define ALIGN_FILE "align.txt"
-#define OUTPUT_FILE "opt.txt"
 
 #ifndef THREAD_NUM
 #define THREAD_NUM 4
 #endif
 
+#ifdef THREADPOOL
+#define OUTPUT_FILE "pool.txt"
+#else
+#define OUTPUT_FILE "opt.txt"
 #endif
+#endif
+
 
 #define DICT_FILE "./dictionary/words.txt"
 
@@ -76,7 +82,6 @@ int main(int argc, char *argv[])
     char *map;
     entry *entry_pool;
     pthread_t threads[THREAD_NUM];
-    thread_arg *thread_args[THREAD_NUM];
 
     /* Start timing */
     clock_gettime(CLOCK_REALTIME, &start);
@@ -89,10 +94,11 @@ int main(int argc, char *argv[])
 
     /* Prepare for multi-threading */
     pthread_setconcurrency(THREAD_NUM + 1);
+#ifndef THREADPOOL
+    thread_arg *thread_args[THREAD_NUM];
     for (int i = 0; i < THREAD_NUM; i++)
         // Created by malloc, remeber to free them.
-        thread_args[i] = createThread_arg(map + MAX_LAST_NAME_SIZE * i, map + file_size, i,
-                                          THREAD_NUM, entry_pool + i);
+        thread_args[i] = createThread_arg(map + MAX_LAST_NAME_SIZE * i, map + file_size, i, THREAD_NUM, entry_pool + i);
     /* Deliver the jobs to all threads and wait for completing */
     clock_gettime(CLOCK_REALTIME, &mid);
     for (int i = 0; i < THREAD_NUM; i++)
@@ -100,6 +106,18 @@ int main(int argc, char *argv[])
 
     for (int i = 0; i < THREAD_NUM; i++)
         pthread_join(threads[i], NULL);
+#else
+    thread_arg *thread_args[THREAD_NUM];
+    for(int i = 0; i < THREAD_NUM; i++)
+        thread_args[i] = createThread_arg(map + MAX_LAST_NAME_SIZE * i, map + file_size, i, THREAD_NUM, entry_pool + i);
+    DEBUG_LOG("In thread pool\n");
+    threadpool_t *pool = threadpool_create(THREAD_NUM, MAX_QUEUE, 0);
+    assert(pool && "Thread pool error.");
+    for(int i = 0; i < THREAD_NUM; i++)
+        threadpool_add(pool, (void *)&append, (void *)thread_args[i], 0);
+    threadpool_destroy(pool, 1);
+
+#endif
 
     /* Connect the linked list of each thread */
     for (int i = 0; i < THREAD_NUM; i++) {
